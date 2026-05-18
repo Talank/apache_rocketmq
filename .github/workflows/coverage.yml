@@ -3,7 +3,7 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
   push:
-    branches: [master, develop]
+  workflow_dispatch:
 jobs:
   calculate-coverage:
     runs-on: ubuntu-latest
