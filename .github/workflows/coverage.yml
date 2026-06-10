@@ -1,12 +1,9 @@
 name: Coverage
 on:
-  pull_request:
-    types: [opened, reopened, synchronize]
-  push:
-    branches: [master, develop]
+  workflow_dispatch:
 jobs:
   calculate-coverage:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@master
       - name: Set up JDK 8
@@ -23,3 +20,10 @@ jobs:
           fail_ci_if_error: true
           verbose: true
           token: cf0cba0a-22f8-4580-89ab-4f1dec3bda6f
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+      fail-fast: false
