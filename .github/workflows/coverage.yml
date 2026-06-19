@@ -12,9 +12,6 @@ jobs:
           java-version: "8"
           distribution: "corretto"
           cache: "maven"
-      - name: Fix JAVA_HOME on macOS
-        if: runner.os == 'macOS'
-        run: echo "JAVA_HOME=$JAVA_HOME/Contents/Home" >> $GITHUB_ENV
       - name: Generate coverage report
         run: mvn -B test -T 2C --file pom.xml
       - name: Upload to Codecov
