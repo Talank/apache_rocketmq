@@ -16,45 +16,32 @@
 
 name: Snapshot Daily Release Automation
 on:
-  schedule: # schedule the job to run at 12 a.m. daily
-    - cron: "0 0 * * *"
   workflow_dispatch:
-    inputs:
-      branch:
-        description: 'The branch to trigger the workflow, The default branch is "develop" when both branch and commit_id are empty'
-        required: false
-      commit_id:
-        description: 'The commit id to trigger the workflow. Do not set branch and commit_id together'
-        required: false
-      rocketmq_version:
-        description: 'Name of the SNAPSHOT version to be generated. The default version is "$VERSION-stable-SNAPSHOT"'
-        required: false
-
 env:
   MAVEN_OPTS: -Dhttp.keepAlive=false -Dmaven.wagon.http.pool=false -Dmaven.wagon.httpconnectionManager.ttlSeconds=120
   DOCKER_REPO: apache/rocketmq-ci
 
 jobs:
   dist-tar:
-    if: github.repository == 'apache/rocketmq'
+    if: always()
     name: Build dist tar
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
       - name: Checkout develop
-        if: github.event.inputs.branch == '' && github.event.inputs.commit_id == ''
+        if: always()
         uses: actions/checkout@v3
         with:
           ref: develop
 
       - name: Checkout specific commit
-        if: github.event.inputs.branch == '' && github.event.inputs.commit_id != ''
+        if: always()
         uses: actions/checkout@v3
         with:
           ref: ${{ github.event.inputs.commit_id }}
 
       - name: Checkout specific branch
-        if: github.event.inputs.branch != '' && github.event.inputs.commit_id == ''
+        if: always()
         uses: actions/checkout@v3
         with:
           ref: ${{ github.event.inputs.branch }}
@@ -75,16 +62,22 @@ jobs:
           name: rocketmq
           path: distribution/target/rocketmq*/rocketmq*
 
+    strategy:
+      matrix:
+        os: &id001
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+      fail-fast: false
   docker-build:
     if: ${{ success() }}
     name: Docker images
-    needs: [ dist-tar ]
+    needs: [dist-tar]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       matrix:
-        base-image: [ "ubuntu" ]
-        java-version: [ "8" ]
+        base-image: ["ubuntu"]
+        java-version: ["8"]
     steps:
       - uses: actions/checkout@v3
         with:
@@ -118,10 +111,9 @@ jobs:
 
   list-version:
     if: >
-      github.repository == 'apache/rocketmq' && 
-      always()
+      github.repository == 'apache/rocketmq' &&  always()
     name: List version
-    needs: [ docker-build ]
+    needs: [docker-build]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -142,7 +134,7 @@ jobs:
   deploy-rocketmq:
     if: ${{ success() }}
     name: Deploy RocketMQ
-    needs: [ list-version,docker-build ]
+    needs: [list-version, docker-build]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -174,14 +166,16 @@ jobs:
                 tag: ${{ matrix.version }}
 
   java-grpc-e2e-test:
-    if: ${{ success() }}
+    if: always()
     name: E2E Test
-    needs: [ list-version, deploy-rocketmq ]
-    runs-on: ubuntu-latest
+    needs: [list-version, deploy-rocketmq]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
       matrix:
         version: ${{ fromJSON(needs.list-version.outputs.version-json) }}
+        os: *id001
+      fail-fast: false
     steps:
       - uses: apache/rocketmq-test-tool@1a646589accad17070423eabf0f54925e52b0666
         name: e2e test
@@ -212,7 +206,7 @@ jobs:
   clean:
     if: always()
     name: Clean
-    needs: [ list-version, java-grpc-e2e-test ]
+    needs: [list-version, java-grpc-e2e-test]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -228,8 +222,8 @@ jobs:
           job-id: ${{ strategy.job-index }}
 
   snapshot:
-    runs-on: ubuntu-latest
-    needs: [ java-grpc-e2e-test ]
+    runs-on: ${{ matrix.os }}
+    needs: [java-grpc-e2e-test]
     env:
       NEXUS_DEPLOY_USERNAME: ${{ secrets.NEXUS_USER }}
       NEXUS_DEPLOY_PASSWORD: ${{ secrets.NEXUS_PW }}
@@ -246,16 +240,20 @@ jobs:
           distribution: "corretto"
           cache: "maven"
       - name: Update default pom version
-        if: github.event.inputs.rocketmq_version == ''
+        if: always()
         run: |
           VERSION=$(mvn -q -Dexec.executable='echo' -Dexec.args='${project.version}' --non-recursive exec:exec)
           VERSION=$(echo $VERSION | awk -F '-SNAPSHOT' '{print $1}')
           VERSION=$VERSION-stable-SNAPSHOT
           mvn versions:set -DnewVersion=$VERSION
       - name: Update User-defined pom version
-        if: github.event.inputs.rocketmq_version != ''
+        if: always()
         run: |
           mvn versions:set -DnewVersion=${{ github.event.inputs.rocketmq_version }}
       - name: Deploy to ASF Snapshots Repository
         timeout-minutes: 40
         run: mvn clean deploy -DskipTests=true --settings .github/asf-deploy-settings.xml
+    strategy:
+      matrix:
+        os: *id001
+      fail-fast: false
